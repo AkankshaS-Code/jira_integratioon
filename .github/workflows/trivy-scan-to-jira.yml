@@ -1,0 +1,219 @@
+name: Trivy Scan to JIRA Tickets
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Docker image to scan'
+        required: true
+        default: 'nginx:1.21'
+        type: choice
+        options:
+          - nginx:1.21
+          - postgres:12
+          - redis:6.0
+          - node:14
+
+jobs:
+  scan-and-create-tickets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Trivy
+        run: |
+          echo "📦 Installing Trivy..."
+          wget -q https://github.com/aquasecurity/trivy/releases/download/v0.48.0/trivy_0.48.0_Linux-64bit.tar.gz
+          tar zxf trivy_0.48.0_Linux-64bit.tar.gz
+          sudo mv trivy /usr/local/bin/
+          trivy --version
+
+      - name: Scan Image with Trivy
+        run: |
+          echo "🔍 Scanning: ${{ github.event.inputs.image }}"
+          trivy image --format json --output results.json --severity CRITICAL,HIGH ${{ github.event.inputs.image }}
+          
+          echo "📊 Vulnerability Summary:"
+          CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' results.json)
+          HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' results.json)
+          
+          echo "🔴 CRITICAL: $CRITICAL"
+          echo "🟠 HIGH: $HIGH"
+          
+          echo "CRITICAL_COUNT=$CRITICAL" >> $GITHUB_ENV
+          echo "HIGH_COUNT=$HIGH" >> $GITHUB_ENV
+
+      - name: Create JIRA Tickets for CRITICAL (Max 3)
+        if: env.CRITICAL_COUNT > 0
+        run: |
+          echo "🎫 Creating JIRA tickets for CRITICAL vulnerabilities..."
+          
+          jq -c '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")' results.json | head -3 | while read vuln; do
+            CVE=$(echo $vuln | jq -r '.VulnerabilityID')
+            PKG=$(echo $vuln | jq -r '.PkgName')
+            VER=$(echo $vuln | jq -r '.InstalledVersion')
+            FIX=$(echo $vuln | jq -r '.FixedVersion // "N/A"')
+            TITLE=$(echo $vuln | jq -r '.Title // "No title available"' | head -c 200)
+            
+            echo "📝 Creating ticket: $CVE in $PKG"
+            
+            RESPONSE=$(curl -s -X POST \
+              "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue" \
+              -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d @- << EOF
+            {
+              "fields": {
+                "project": {"key": "SCRUM"},
+                "summary": "[CRITICAL] $CVE in $PKG",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "heading",
+                      "attrs": {"level": 2},
+                      "content": [{"type": "text", "text": "🔒 Vulnerability Details"}]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Scanned Image: ", "marks": [{"type": "strong"}]},
+                        {"type": "text", "text": "${{ github.event.inputs.image }}"}
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "CVE ID: ", "marks": [{"type": "strong"}]},
+                        {"type": "text", "text": "$CVE"}
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Package: ", "marks": [{"type": "strong"}]},
+                        {"type": "text", "text": "$PKG"}
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Installed Version: ", "marks": [{"type": "strong"}]},
+                        {"type": "text", "text": "$VER"}
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Fixed Version: ", "marks": [{"type": "strong"}]},
+                        {"type": "text", "text": "$FIX"}
+                      ]
+                    },
+                    {
+                      "type": "heading",
+                      "attrs": {"level": 3},
+                      "content": [{"type": "text", "text": "📋 Description"}]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [{"type": "text", "text": "$TITLE"}]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "⚠️ Auto-generated from Trivy scan using OAuth 2.0", "marks": [{"type": "em"}]}
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {"name": "Task"},
+                "priority": {"name": "Highest"}
+              }
+            }
+          EOF
+            )
+            
+            KEY=$(echo $RESPONSE | jq -r '.key // empty')
+            if [ ! -z "$KEY" ]; then
+              echo "✅ Created: $KEY - https://akanksha-singhal.atlassian.net/browse/$KEY"
+            else
+              echo "❌ Failed for $CVE"
+              echo "$RESPONSE" | jq .
+            fi
+            
+            sleep 2
+          done
+
+      - name: Create JIRA Tickets for HIGH (Max 2)
+        if: env.HIGH_COUNT > 0
+        run: |
+          echo "🎫 Creating JIRA tickets for HIGH vulnerabilities..."
+          
+          jq -c '.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")' results.json | head -2 | while read vuln; do
+            CVE=$(echo $vuln | jq -r '.VulnerabilityID')
+            PKG=$(echo $vuln | jq -r '.PkgName')
+            VER=$(echo $vuln | jq -r '.InstalledVersion')
+            FIX=$(echo $vuln | jq -r '.FixedVersion // "N/A"')
+            
+            echo "📝 Creating ticket: $CVE in $PKG"
+            
+            RESPONSE=$(curl -s -X POST \
+              "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue" \
+              -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d @- << EOF
+            {
+              "fields": {
+                "project": {"key": "SCRUM"},
+                "summary": "[HIGH] $CVE in $PKG",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Image: ${{ github.event.inputs.image }} | Package: $PKG | Installed: $VER | Fixed: $FIX"}
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Auto-generated from Trivy scan", "marks": [{"type": "em"}]}
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {"name": "Task"},
+                "priority": {"name": "High"}
+              }
+            }
+          EOF
+            )
+            
+            KEY=$(echo $RESPONSE | jq -r '.key // empty')
+            if [ ! -z "$KEY" ]; then
+              echo "✅ Created: $KEY"
+            fi
+            
+            sleep 2
+          done
+
+      - name: Summary Report
+        if: always()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 Trivy Scan → JIRA Integration Complete"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🐳 Image: ${{ github.event.inputs.image }}"
+          echo "🔴 CRITICAL: ${{ env.CRITICAL_COUNT }} (created max 3 tickets)"
+          echo "🟠 HIGH: ${{ env.HIGH_COUNT }} (created max 2 tickets)"
+          echo "✅ JIRA tickets created with OAuth 2.0"
+          echo "🔗 View: https://akanksha-singhal.atlassian.net/browse/SCRUM"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Upload Scan Results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: trivy-scan-results
+          path: results.json
