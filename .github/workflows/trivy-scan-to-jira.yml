@@ -211,9 +211,4 @@ jobs:
           echo "🔗 View: https://akanksha-singhal.atlassian.net/browse/SCRUM"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-      - name: Upload Scan Results
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: trivy-scan-results
-          path: results.json
+  
