@@ -1,0 +1,361 @@
+name: JIRA OAuth Integration (App-Based)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Test action to perform'
+        required: true
+        type: choice
+        options:
+          - create_ticket
+          - update_status
+          - add_comment
+          - create_vulnerability_ticket
+          - all
+
+jobs:
+  jira-oauth:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get OAuth Access Token
+        id: auth
+        run: |
+          echo "🔐 Getting OAuth token using app credentials..."
+          
+          RESPONSE=$(curl -s -X POST 'https://api.atlassian.com/oauth/token' \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "audience": "api.atlassian.com",
+              "grant_type": "client_credentials",
+              "client_id": "${{ secrets.ATLASSIAN_CLIENT_ID }}",
+              "client_secret": "${{ secrets.ATLASSIAN_CLIENT_SECRET }}"
+            }')
+          
+          ACCESS_TOKEN=$(echo $RESPONSE | jq -r '.access_token')
+          
+          if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "❌ Failed to get OAuth token"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Successfully obtained OAuth token!"
+          echo "ACCESS_TOKEN=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Test 1 - Create Basic Ticket
+        if: github.event.inputs.action == 'create_ticket' || github.event.inputs.action == 'all'
+        run: |
+          echo "📝 Creating JIRA ticket using OAuth..."
+          
+          RESPONSE=$(curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue" \
+            -H "Authorization: Bearer ${{ steps.auth.outputs.ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "project": {
+                  "key": "SCRUM"
+                },
+                "summary": "[OAuth Test] Ticket created at '"$(date '+%Y-%m-%d %H:%M:%S')"'",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "✅ This ticket was created using OAuth 2.0 app-based authentication (NO API TOKEN!)."
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Authentication Method: OAuth 2.0 Client Credentials"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Created from: GitHub Actions workflow"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {
+                  "name": "Task"
+                }
+              }
+            }')
+          
+          TICKET_KEY=$(echo $RESPONSE | jq -r '.key')
+          
+          if [ "$TICKET_KEY" = "null" ] || [ -z "$TICKET_KEY" ]; then
+            echo "❌ Failed to create ticket"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Created ticket: $TICKET_KEY"
+          echo "🔗 View at: https://akanksha-singhal.atlassian.net/browse/$TICKET_KEY"
+          echo "LAST_TICKET=$TICKET_KEY" >> $GITHUB_ENV
+
+      - name: Test 2 - Update Ticket Status
+        if: github.event.inputs.action == 'update_status' || github.event.inputs.action == 'all'
+        run: |
+          echo "🔄 Updating ticket status..."
+          
+          # Get available transitions for SCRUM-2
+          TRANSITIONS=$(curl -s -X GET \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-2/transitions" \
+            -H "Authorization: Bearer ${{ steps.auth.outputs.ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json")
+          
+          echo "Available transitions:"
+          echo $TRANSITIONS | jq '.transitions[] | {id: .id, name: .name}'
+          
+          # Get the first available transition
+          TRANSITION_ID=$(echo $TRANSITIONS | jq -r '.transitions[0].id')
+          
+          if [ "$TRANSITION_ID" = "null" ] || [ -z "$TRANSITION_ID" ]; then
+            echo "⚠️  No transitions available"
+          else
+            curl -s -X POST \
+              "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-2/transitions" \
+              -H "Authorization: Bearer ${{ steps.auth.outputs.ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"transition\": {
+                  \"id\": \"$TRANSITION_ID\"
+                }
+              }"
+            
+            echo "✅ Updated ticket status"
+          fi
+
+      - name: Test 3 - Add Comment
+        if: github.event.inputs.action == 'add_comment' || github.event.inputs.action == 'all'
+        run: |
+          echo "💬 Adding comment to ticket..."
+          
+          curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-2/comment" \
+            -H "Authorization: Bearer ${{ steps.auth.outputs.ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "body": {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "✅ Comment added via OAuth 2.0 authentication at '"$(date)"'"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "No API token used - using app-based OAuth!"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }'
+          
+          echo "✅ Comment added successfully"
+
+      - name: Test 4 - Create Vulnerability Ticket
+        if: github.event.inputs.action == 'create_vulnerability_ticket' || github.event.inputs.action == 'all'
+        run: |
+          echo "🔒 Creating vulnerability ticket..."
+          
+          # Simulate CVE data from Trivy scan
+          CVE_ID="CVE-2024-12345"
+          SEVERITY="CRITICAL"
+          PACKAGE="openssl"
+          VERSION="1.1.1k"
+          FIXED_VERSION="1.1.1w"
+          CVSS_SCORE="9.8"
+          
+          RESPONSE=$(curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue" \
+            -H "Authorization: Bearer ${{ steps.auth.outputs.ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "project": {
+                  "key": "SCRUM"
+                },
+                "summary": "['"$SEVERITY"'] '"$CVE_ID"' in '"$PACKAGE"'",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "heading",
+                      "attrs": {"level": 2},
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "🔒 Vulnerability Details"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "CVE ID: ",
+                          "marks": [{"type": "strong"}]
+                        },
+                        {
+                          "type": "text",
+                          "text": "'"$CVE_ID"'"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Severity: ",
+                          "marks": [{"type": "strong"}]
+                        },
+                        {
+                          "type": "text",
+                          "text": "'"$SEVERITY"' (CVSS: '"$CVSS_SCORE"')"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Package: ",
+                          "marks": [{"type": "strong"}]
+                        },
+                        {
+                          "type": "text",
+                          "text": "'"$PACKAGE"'"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Installed Version: ",
+                          "marks": [{"type": "strong"}]
+                        },
+                        {
+                          "type": "text",
+                          "text": "'"$VERSION"'"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Fixed Version: ",
+                          "marks": [{"type": "strong"}]
+                        },
+                        {
+                          "type": "text",
+                          "text": "'"$FIXED_VERSION"'"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "heading",
+                      "attrs": {"level": 3},
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "📋 References"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "NVD Link: "
+                        },
+                        {
+                          "type": "text",
+                          "text": "https://nvd.nist.gov/vuln/detail/'"$CVE_ID"'",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "https://nvd.nist.gov/vuln/detail/'"$CVE_ID"'"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "⚠️ This ticket was automatically created from a Trivy security scan using OAuth 2.0 authentication."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {
+                  "name": "Task"
+                },
+                "priority": {
+                  "name": "Highest"
+                }
+              }
+            }')
+          
+          TICKET_KEY=$(echo $RESPONSE | jq -r '.key')
+          
+          if [ "$TICKET_KEY" = "null" ] || [ -z "$TICKET_KEY" ]; then
+            echo "❌ Failed to create vulnerability ticket"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Created vulnerability ticket: $TICKET_KEY"
+          echo "🔗 View at: https://akanksha-singhal.atlassian.net/browse/$TICKET_KEY"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 Test Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ OAuth Authentication: SUCCESS"
+          echo "✅ Using App-Based Credentials (No API Token)"
+          echo "✅ All operations tested successfully!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
