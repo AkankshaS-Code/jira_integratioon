@@ -1,0 +1,76 @@
+name: Webhook → JIRA Integration
+
+on:
+  repository_dispatch:
+    types: [vulnerability_found, create_ticket]
+
+jobs:
+  webhook-to-jira:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔔 Webhook Received
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔔 WEBHOOK TRIGGERED!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Event: ${{ github.event.action }}"
+          echo "Time: $(date)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: 📦 Extract Payload
+        id: data
+        run: |
+          CVE="${{ github.event.client_payload.cve_id || 'CVE-2024-WEBHOOK-TEST' }}"
+          SEV="${{ github.event.client_payload.severity || 'HIGH' }}"
+          PKG="${{ github.event.client_payload.package || 'test-package' }}"
+          
+          echo "CVE_ID=$CVE" >> $GITHUB_OUTPUT
+          echo "SEVERITY=$SEV" >> $GITHUB_OUTPUT
+          echo "PACKAGE=$PKG" >> $GITHUB_OUTPUT
+          
+          echo "Received: $CVE ($SEV) in $PKG"
+
+      - name: 🎫 Create JIRA Ticket
+        run: |
+          CVE="${{ steps.data.outputs.CVE_ID }}"
+          SEV="${{ steps.data.outputs.SEVERITY }}"
+          PKG="${{ steps.data.outputs.PACKAGE }}"
+          
+          RESPONSE=$(curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "project": {"key": "SCRUM"},
+                "summary": "[WEBHOOK] '"$CVE"' in '"$PKG"'",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [{
+                    "type": "paragraph",
+                    "content": [{
+                      "type": "text",
+                      "text": "🔔 Created via WEBHOOK | CVE: '"$CVE"' | Severity: '"$SEV"' | Package: '"$PKG"' | ⚡ Event-driven automation with OAuth 2.0"
+                    }]
+                  }]
+                },
+                "issuetype": {"name": "Task"}
+              }
+            }')
+          
+          KEY=$(echo $RESPONSE | jq -r '.key // empty')
+          
+          if [ ! -z "$KEY" ]; then
+            echo "✅ Created: $KEY"
+            echo "🔗 https://akanksha-singhal.atlassian.net/browse/$KEY"
+          else
+            echo "❌ Failed"
+            echo "$RESPONSE" | jq .
+          fi
+
+      - name: 📊 Summary
+        run: |
+          echo "✅ WEBHOOK → JIRA Complete!"
+          echo "🔐 Auth: OAuth 2.0"
+          echo "⚡ Trigger: Event-Driven Webhook"
