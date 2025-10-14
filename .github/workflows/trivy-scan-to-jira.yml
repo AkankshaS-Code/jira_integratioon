@@ -125,8 +125,8 @@ jobs:
                     }
                   ]
                 },
-                "issuetype": {"name": "Task"},
-                "priority": {"name": "Highest"}
+                "issuetype": {"name": "Task"}
+                
               }
             }
           EOF
@@ -183,8 +183,8 @@ jobs:
                     }
                   ]
                 },
-                "issuetype": {"name": "Task"},
-                "priority": {"name": "High"}
+                "issuetype": {"name": "Task"}
+               
               }
             }
           EOF
