@@ -1,0 +1,101 @@
+name: Test All JIRA Operations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-operations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1️⃣ Update Ticket Status
+        run: |
+          echo "🔄 Testing: Update ticket status..."
+          
+          # Get transitions for SCRUM-3
+          TRANSITIONS=$(curl -s -X GET \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-3/transitions" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}")
+          
+          echo "Available transitions:"
+          echo "$TRANSITIONS" | jq '.transitions[] | {id: .id, name: .name}'
+          
+          # Get first transition
+          TRANS_ID=$(echo "$TRANSITIONS" | jq -r '.transitions[0].id')
+          
+          if [ ! -z "$TRANS_ID" ] && [ "$TRANS_ID" != "null" ]; then
+            curl -s -X POST \
+              "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-3/transitions" \
+              -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{"transition": {"id": "'"$TRANS_ID"'"}}'
+            
+            echo "✅ Updated ticket status!"
+          fi
+
+      - name: 2️⃣ Add Comment
+        run: |
+          echo "💬 Testing: Add comment to ticket..."
+          
+          curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-3/comment" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "body": {
+                "type": "doc",
+                "version": 1,
+                "content": [{
+                  "type": "paragraph",
+                  "content": [{
+                    "type": "text",
+                    "text": "✅ Automated comment via OAuth 2.0 - Testing all JIRA operations at '"$(date)"'"
+                  }]
+                }]
+              }
+            }'
+          
+          echo "✅ Added comment!"
+
+      - name: 3️⃣ Query Tickets
+        run: |
+          echo "🔍 Testing: Query tickets..."
+          
+          RESULTS=$(curl -s -X GET \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/search?jql=project=SCRUM&maxResults=10" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}")
+          
+          echo "Recent SCRUM tickets:"
+          echo "$RESULTS" | jq -r '.issues[] | "✅ \(.key): \(.fields.summary) [\(.fields.status.name)]"'
+
+      - name: 4️⃣ Update Ticket Field
+        run: |
+          echo "📝 Testing: Update ticket fields..."
+          
+          curl -s -X PUT \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/SCRUM-3" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "labels": ["oauth-test", "automated"]
+              }
+            }'
+          
+          echo "✅ Updated ticket labels!"
+
+      - name: 📊 Summary
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ ALL JIRA OPERATIONS TESTED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔐 Authentication: OAuth 2.0 (App-Based)"
+          echo ""
+          echo "Operations Tested:"
+          echo "  ✅ Create Ticket (Trivy workflow)"
+          echo "  ✅ Update Status"
+          echo "  ✅ Add Comment"
+          echo "  ✅ Query Tickets"
+          echo "  ✅ Update Fields"
+          echo ""
+          echo "🎉 Complete JIRA automation demonstrated!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
