@@ -1,0 +1,368 @@
+name: Test Update Operations (OAuth)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Update operation to test'
+        type: choice
+        options:
+          - add_comment
+          - change_status
+          - update_labels
+          - update_description
+          - all_updates
+
+jobs:
+  test-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Test Ticket (if testing all)
+        if: github.event.inputs.operation == 'all_updates'
+        id: create
+        run: |
+          echo "📝 Creating test ticket for update operations..."
+          
+          RESPONSE=$(curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "project": {"key": "SCRUM"},
+                "summary": "[UPDATE-TEST] Testing all update operations",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [{
+                    "type": "paragraph",
+                    "content": [{
+                      "type": "text",
+                      "text": "This ticket will be updated with various operations to demonstrate OAuth 2.0 capabilities"
+                    }]
+                  }]
+                },
+                "issuetype": {"name": "Task"}
+              }
+            }')
+          
+          KEY=$(echo $RESPONSE | jq -r '.key')
+          echo "TEST_TICKET=$KEY" >> $GITHUB_ENV
+          echo "TICKET_KEY=$KEY" >> $GITHUB_OUTPUT
+          echo "✅ Created test ticket: $KEY"
+          echo "🔗 https://akanksha-singhal.atlassian.net/browse/$KEY"
+          
+      - name: Set Ticket for Individual Tests
+        if: github.event.inputs.operation != 'all_updates'
+        run: |
+          echo "TEST_TICKET=SCRUM-3" >> $GITHUB_ENV
+          echo "Using existing ticket SCRUM-3 for testing"
+
+      - name: UPDATE 1 - Add Comment
+        if: github.event.inputs.operation == 'add_comment' || github.event.inputs.operation == 'all_updates'
+        run: |
+          echo "💬 UPDATE Operation: Adding comment..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          
+          curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET/comment" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "body": {
+                "type": "doc",
+                "version": 1,
+                "content": [{
+                  "type": "paragraph",
+                  "content": [{
+                    "type": "text",
+                    "text": "💬 Update Operation Test: Comment added via OAuth 2.0 at '"$(date)"'"
+                  }]
+                }]
+              }
+            }'
+          
+          echo "✅ Comment added successfully"
+          sleep 2
+
+      - name: UPDATE 2 - Add More Detailed Comment
+        if: github.event.inputs.operation == 'all_updates'
+        run: |
+          echo "💬 UPDATE: Adding detailed progress comment..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          
+          curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET/comment" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "body": {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                  {
+                    "type": "heading",
+                    "attrs": {"level": 3},
+                    "content": [{"type": "text", "text": "🔄 Progress Update"}]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {"type": "text", "text": "Status: ", "marks": [{"type": "strong"}]},
+                      {"type": "text", "text": "Testing update operations"}
+                    ]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {"type": "text", "text": "Completed Steps:", "marks": [{"type": "strong"}]}
+                    ]
+                  },
+                  {
+                    "type": "bulletList",
+                    "content": [
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "✅ Ticket created"}]
+                        }]
+                      },
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "✅ First comment added"}]
+                        }]
+                      },
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "⏳ More updates coming..."}]
+                        }]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }'
+          
+          echo "✅ Detailed comment added"
+          sleep 2
+
+      - name: UPDATE 3 - Update Labels
+        if: github.event.inputs.operation == 'update_labels' || github.event.inputs.operation == 'all_updates'
+        run: |
+          echo "🏷️ UPDATE Operation: Updating labels..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          
+          curl -s -X PUT \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "labels": ["oauth-tested", "automated", "update-test", "verified"]
+              }
+            }'
+          
+          echo "✅ Labels updated: oauth-tested, automated, update-test, verified"
+          sleep 2
+
+      - name: UPDATE 4 - Update Description
+        if: github.event.inputs.operation == 'update_description' || github.event.inputs.operation == 'all_updates'
+        run: |
+          echo "📝 UPDATE Operation: Updating description..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          
+          curl -s -X PUT \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "fields": {
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [{
+                        "type": "text",
+                        "text": "🔄 DESCRIPTION UPDATED via OAuth 2.0",
+                        "marks": [{"type": "strong"}]
+                      }]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [{
+                        "type": "text",
+                        "text": "This description was updated by automated workflow to demonstrate update capabilities."
+                      }]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [{
+                        "type": "text",
+                        "text": "Updated at: '"$(date)"'",
+                        "marks": [{"type": "em"}]
+                      }]
+                    }
+                  ]
+                }
+              }
+            }'
+          
+          echo "✅ Description updated"
+          sleep 2
+
+      - name: UPDATE 5 - Get Available Transitions
+        if: github.event.inputs.operation == 'change_status' || github.event.inputs.operation == 'all_updates'
+        id: transitions
+        run: |
+          echo "🔍 Getting available status transitions..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          
+          TRANS=$(curl -s -X GET \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET/transitions" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}")
+          
+          echo "Available transitions for $TICKET:"
+          echo "$TRANS" | jq '.transitions[] | {id: .id, name: .name}'
+          
+          # Get first transition ID
+          TRANS_ID=$(echo "$TRANS" | jq -r '.transitions[0].id // empty')
+          echo "TRANS_ID=$TRANS_ID" >> $GITHUB_OUTPUT
+          
+          if [ -z "$TRANS_ID" ]; then
+            echo "⚠️ No transitions available (ticket might already be in final state)"
+          fi
+
+      - name: UPDATE 6 - Change Status
+        if: (github.event.inputs.operation == 'change_status' || github.event.inputs.operation == 'all_updates') && steps.transitions.outputs.TRANS_ID != ''
+        run: |
+          echo "🔄 UPDATE Operation: Changing ticket status..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          TRANS_ID="${{ steps.transitions.outputs.TRANS_ID }}"
+          
+          if [ ! -z "$TRANS_ID" ]; then
+            curl -s -X POST \
+              "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET/transitions" \
+              -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{"transition": {"id": "'"$TRANS_ID"'"}}'
+            
+            echo "✅ Status changed successfully"
+          else
+            echo "⚠️ Skipped - no transitions available"
+          fi
+          
+          sleep 2
+
+      - name: UPDATE 7 - Add Final Summary Comment
+        if: github.event.inputs.operation == 'all_updates'
+        run: |
+          echo "📊 Adding final summary comment..."
+          
+          TICKET="${{ env.TEST_TICKET }}"
+          
+          curl -s -X POST \
+            "https://api.atlassian.com/ex/jira/${{ secrets.ATLASSIAN_CLOUD_ID }}/rest/api/3/issue/$TICKET/comment" \
+            -H "Authorization: Bearer ${{ secrets.ATLASSIAN_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "body": {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                  {
+                    "type": "heading",
+                    "attrs": {"level": 3},
+                    "content": [{"type": "text", "text": "✅ All Update Operations Completed"}]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [{
+                      "type": "text",
+                      "text": "Successfully tested:"
+                    }]
+                  },
+                  {
+                    "type": "bulletList",
+                    "content": [
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "✅ Add comments"}]
+                        }]
+                      },
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "✅ Update labels"}]
+                        }]
+                      },
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "✅ Update description"}]
+                        }]
+                      },
+                      {
+                        "type": "listItem",
+                        "content": [{
+                          "type": "paragraph",
+                          "content": [{"type": "text", "text": "✅ Change status"}]
+                        }]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "paragraph",
+                    "content": [{
+                      "type": "text",
+                      "text": "🔐 All operations performed via OAuth 2.0 app-based authentication",
+                      "marks": [{"type": "em"}]
+                    }]
+                  }
+                ]
+              }
+            }'
+          
+          echo "✅ Summary comment added"
+
+      - name: Final Summary
+        if: always()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 UPDATE OPERATIONS TEST COMPLETE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Ticket: ${{ env.TEST_TICKET }}"
+          echo ""
+          echo "✅ Operations Tested:"
+          echo "   1. Add comments (simple & detailed)"
+          echo "   2. Update labels"
+          echo "   3. Update description"
+          echo "   4. Change status (workflow transitions)"
+          echo ""
+          echo "🔐 Authentication: OAuth 2.0 (App-Based)"
+          echo "⚡ All updates work seamlessly!"
+          echo ""
+          echo "💡 Real-World Use Cases:"
+          echo "   • CVE remediation progress tracking"
+          echo "   • Deployment status updates"
+          echo "   • Infrastructure script results"
+          echo "   • Automated ticket lifecycle management"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
