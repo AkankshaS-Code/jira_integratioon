@@ -1,0 +1,120 @@
+name: TEST - PR Build with JIRA Integration
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_title:
+        description: 'Simulate PR title (e.g., SCRUM-3: Add feature)'
+        required: true
+        default: 'SCRUM-3: Test PR integration'
+
+jobs:
+  extract-jira-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract JIRA ID from PR Title
+        id: jira
+        run: |
+          # Get PR title
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            PR_TITLE="${{ github.event.pull_request.title }}"
+            PR_URL="${{ github.event.pull_request.html_url }}"
+            PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          else
+            # Manual trigger
+            PR_TITLE="${{ github.event.inputs.pr_title }}"
+            PR_URL="https://github.com/${{ github.repository }}/pull/999"
+            PR_AUTHOR="${{ github.actor }}"
+          fi
+          
+          echo "PR Title: $PR_TITLE"
+          
+          # Extract JIRA ID (e.g., SCRUM-3, DEVOPS-231)
+          JIRA_ID=$(echo "$PR_TITLE" | grep -oE '[A-Z]+-[0-9]+' | head -1)
+          
+          if [ -z "$JIRA_ID" ]; then
+            echo "⚠️ No JIRA ID found in PR title"
+            echo "HAS_JIRA=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Found JIRA ID: $JIRA_ID"
+            echo "HAS_JIRA=true" >> $GITHUB_OUTPUT
+            echo "JIRA_ID=$JIRA_ID" >> $GITHUB_OUTPUT
+            echo "PR_URL=$PR_URL" >> $GITHUB_OUTPUT
+            echo "PR_AUTHOR=$PR_AUTHOR" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Simulate Build Step
+        id: build
+        run: |
+          echo "🔨 Simulating build process..."
+          echo "Running tests..."
+          sleep 3
+          echo "✅ Build successful!"
+          echo "BUILD_STATUS=success" >> $GITHUB_OUTPUT
+
+      - name: JIRA Login
+        if: steps.jira.outputs.HAS_JIRA == 'true'
+        uses: atlassian/gajira-login@v3
+        env:
+          JIRA_BASE_URL: https://akanksha-singhal.atlassian.net
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+
+      - name: Transition JIRA to In Review
+        if: steps.jira.outputs.HAS_JIRA == 'true'
+        uses: atlassian/gajira-transition@v3
+        with:
+          issue: ${{ steps.jira.outputs.JIRA_ID }}
+          transition: "In Progress"
+        continue-on-error: true
+
+      - name: Add PR Info to JIRA
+        if: steps.jira.outputs.HAS_JIRA == 'true'
+        uses: atlassian/gajira-comment@v3
+        with:
+          issue: ${{ steps.jira.outputs.JIRA_ID }}
+          comment: |
+            🔗 **PR Workflow - Build Check**
+            
+            **PR Details:**
+            - Link: ${{ steps.jira.outputs.PR_URL }}
+            - Author: @${{ steps.jira.outputs.PR_AUTHOR }}
+            - Status: Open for review
+            
+            **Build Status:** ✅ ${{ steps.build.outputs.BUILD_STATUS }}
+            
+            _Automated via GitHub JIRA Actions (no custom code)_
+
+      - name: Report Build Status
+        if: steps.jira.outputs.HAS_JIRA == 'true' && failure()
+        uses: atlassian/gajira-comment@v3
+        with:
+          issue: ${{ steps.jira.outputs.JIRA_ID }}
+          comment: |
+            ❌ **Build Failed**
+            
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            Please check the logs.
+        continue-on-error: true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 PR JIRA Integration Test"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ "${{ steps.jira.outputs.HAS_JIRA }}" == "true" ]; then
+            echo "✅ JIRA ID: ${{ steps.jira.outputs.JIRA_ID }}"
+            echo "✅ Transitioned to In Progress"
+            echo "✅ Added PR link and build status"
+          else
+            echo "⚠️ No JIRA ID in PR title"
+          fi
+          echo "🔧 Using: GitHub JIRA Actions"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
